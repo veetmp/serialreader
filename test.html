@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Serial Viewer + Calibration (Light)</title>
+<style>
+  :root{
+    --bg:#f8fafc; --card:#ffffff; --muted:#475569; --text:#0f172a; --accent:#0ea5e9;
+    --border:#e5e7eb; --grid:#e2e8f0; --ok:#059669; --danger:#b91c1c; --okbg:#10b981; --dangerbg:#ef4444;
+    --uncal-bg:#fff7a8; --overlay:#ef44444d; --chip:#cbd5e1;
+  }
+  html,body { height:100%; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial; background:var(--bg); color:var(--text); }
+  .wrap { max-width:1200px; margin:24px auto; padding:0 16px; }
+  h1 { font-size:1.4rem; margin:0 0 12px; }
+  .grid { display:grid; gap:16px; grid-template-columns: 1fr; }
+  @media (min-width: 1080px) { .grid { grid-template-columns: 320px 1fr; } }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 10px 20px rgba(0,0,0,.06); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  label { font-size:.9rem; color:var(--muted); }
+  select, input[type="number"], input[type="text"] {
+    background:transparent; color:var(--text); border:1px solid var(--border); border-radius:10px;
+    padding:8px 10px; outline:none; min-width:90px;
+  }
+  button {
+    background:transparent; color:var(--text); border:1px solid var(--border); border-radius:12px; padding:10px 14px;
+    cursor:pointer; transition:transform .02s ease, background-color .15s ease, border-color .15s ease;
+  }
+  button:hover { border-color:#cbd5e1; }
+  button:active { transform:translateY(1px); }
+  .stat { font-size:2.0rem; font-variant-numeric:tabular-nums; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  .log { height:180px; overflow:auto; background:transparent; border:1px solid var(--border); border-radius:12px; padding:8px 10px; font-family:ui-monospace, Menlo, Consolas, monospace; font-size:.9rem; white-space:pre; position:relative; }
+  .log-header { display:flex; align-items:center; justify-content:space-between; }
+  .copy-btn{ font-size:.85rem; padding:6px 10px; }
+  .copied-badge{ font-size:.75rem; color:#16a34a; opacity:0; transition:opacity .2s; }
+  .copied-badge.show{ opacity:1; }
+  .pill { font-size:.8rem; padding:2px 8px; border:1px solid var(--chip); border-radius:999px; color:var(--muted); }
+  .sep { height:1px; background:var(--border); margin:12px 0; }
+  .ok { color:var(--ok); }
+  .btn-rec-off { background:var(--dangerbg); border-color:var(--dangerbg); color:#fff; }
+  .btn-rec-on  { background:var(--okbg);     border-color:var(--okbg);     color:#fff; }
+  .btn-connect { background:#ef4444; border-color:#ef4444; color:#fff; }
+  .btn-capture { background:#6366f1; border-color:#6366f1; color:#fff; }
+  .btn-apply-stream { background:#14b8a6; border-color:#14b8a6; color:#fff; } /* teal */
+  .btn-dl-green{ background:#10b981; border-color:#10b981; color:#fff; }
+  .btn-link { border-color:#94a3b8; }
+  .rec-dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:#b91c1c; margin-right:8px; transform:translateY(1px); }
+  canvas { width:100%; height:280px; background:transparent; border-radius:12px; border:1px solid var(--border); display:block; }
+  .chart-wrap{ position:relative; }
+  .file-pin{ position:absolute; top:6px; transform:translate(-50%,0); background:#fff; border:1px solid var(--border); border-radius:999px; padding:6px; font-size:1rem; box-shadow:0 4px 10px rgba(0,0,0,.08); cursor:pointer; line-height:1; }
+  .file-pin:hover{ box-shadow:0 6px 14px rgba(0,0,0,.12); }
+  details summary { cursor:pointer; user-select:none; }
+  .record-list a{ text-decoration:none; }
+  .tip { position:absolute; pointer-events:none; background:#111827; color:#fff; border-radius:8px; padding:6px 8px; font-size:.8rem; transform:translate(8px,-100%); white-space:nowrap; opacity:.92; }
+  .prec-grid { display:grid; grid-template-columns: auto 60px auto 60px; gap:8px; align-items:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Serial Viewer + Calibration</h1>
+
+  <div class="grid">
+    <!-- Left: Connection + Advanced + Recordings list -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div class="row">
+          <button id="connectBtn" class="btn-connect">Connect</button>
+          <button id="disconnectBtn" disabled>Disconnect</button>
+          <span id="status" class="pill">Not connected</span>
+        </div>
+        <button id="jumpToCal" class="btn-link" title="Scroll to calibration">Go to Calibration</button>
+      </div>
+
+      <div class="sep"></div>
+
+      <details id="advanced">
+        <summary><strong>Advanced</strong></summary>
+        <div class="sep"></div>
+
+        <div class="row">
+          <label>Baud</label>
+          <select id="baud">
+            <option>9600</option><option>19200</option><option selected>38400</option>
+            <option>57600</option><option>115200</option><option>230400</option>
+          </select>
+          <label>Data bits</label>
+          <select id="databits"><option selected>8</option><option>7</option></select>
+          <label>Parity</label>
+          <select id="parity"><option selected>none</option><option>even</option><option>odd</option></select>
+          <label>Stop bits</label>
+          <select id="stopbits"><option selected>1</option><option>2</option></select>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="applyBtn">Apply settings</button>
+          <span class="muted">Sketch default <b>38400</b>.</span>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="row">
+          <label>Send command</label>
+          <input id="tx" type="text" placeholder="e.g., TARE or SET_SCALE 1" />
+          <button id="sendBtn">Send</button>
+        </div>
+
+        <div class="sep"></div>
+
+        <div>
+          <div class="muted">Precision (decimal places) for units</div>
+          <div class="prec-grid" style="margin-top:6px;">
+            <label for="precN">N</label>    <input id="precN" type="number" min="0" max="8" value="3" />
+            <label for="precKg">kg</label>  <input id="precKg" type="number" min="0" max="8" value="1" />
+            <label for="precG">g</label>    <input id="precG" type="number" min="0" max="8" value="0" />
+            <label for="precLbf">lbf</label><input id="precLbf" type="number" min="0" max="8" value="1" />
+          </div>
+        </div>
+      </details>
+
+      <div class="sep"></div>
+      <div class="muted">Browser support</div>
+      <div id="supportMsg" class="muted"></div>
+
+      <div class="sep"></div>
+      <h3 style="margin:0 0 6px;">Recordings</h3>
+      <div id="recordingsList" class="record-list muted">No recordings yet.</div>
+    </div>
+
+    <!-- Right: Live Display + Recording -->
+    <div class="card" id="streamCard">
+      <div class="row" style="justify-content:space-between; flex-wrap:wrap;">
+        <div><div class="muted">Latest (raw)</div><div id="latestRaw" class="stat">—</div></div>
+        <div><div class="muted">Calibrated (N)</div><div id="latestCalN" class="stat">—</div></div>
+        <div>
+          <div class="row" style="gap:6px; align-items:center;">
+            <div class="muted">Display units</div>
+            <select id="dispUnits"><option value="N" selected>N</option><option value="kg">kg</option><option value="g">g</option><option value="lbf">lbf</option></select>
+          </div>
+          <div id="latestCalDisp" class="stat">—</div>
+        </div>
+        <div><div class="muted">Samples</div><div id="count" class="stat">0</div></div>
+        <div><div class="muted">Rate</div><div id="rate" class="stat">0/s</div></div>
+        <div><div class="muted inline">Calibration <span id="calibActive" class="pill">off</span></div></div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="row" style="align-items:flex-end; gap:10px;">
+        <div>
+          <label class="muted">CSV name prefix (optional)</label><br/>
+          <input id="filePrefix" type="text" placeholder="serial_log" style="min-width:180px" />
+        </div>
+        <div class="row" style="gap:8px; align-items:center;">
+          <button id="recordBtn" class="btn-rec-off">Record</button>
+          <button id="downloadBtn" disabled>Download last CSV</button>
+          <span id="recStatus" class="muted">Not recording</span>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="chart-wrap" id="chartWrap" style="user-select:none; position:relative;">
+        <canvas id="chart" width="1000" height="280"></canvas>
+        <div id="tooltip" class="tip" style="display:none;"></div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="row" style="gap:16px;">
+        <div style="flex:1;">
+          <div class="log-header">
+            <div class="muted">Raw log</div>
+            <div><button class="copy-btn" id="copyRaw">Copy</button><span class="copied-badge" id="copiedRaw">Copied!</span></div>
+          </div>
+          <div id="logRaw" class="log"></div>
+        </div>
+        <div style="flex:1;">
+          <div class="log-header">
+            <div class="muted">Calibrated force log (N)</div>
+            <div><button class="copy-btn" id="copyCal">Copy</button><span class="copied-badge" id="copiedCal">Copied!</span></div>
+          </div>
+          <div id="logCal" class="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sep" style="margin:18px 0;"></div>
+
+  <!-- Calibration -->
+  <div class="card" id="calSection">
+    <div class="row" style="justify-content:space-between;">
+      <div class="row">
+        <h2 style="margin:0;">Calibration</h2>
+        <span class="muted">Fit <em>N</em> = a + b · raw (capture zero by entering known = 0)</span>
+      </div>
+      <div class="row">
+        <label>Known value units</label>
+        <select id="knownUnits"><option value="kg" selected>kg</option><option value="g">g</option><option value="N">N</option><option value="lbf">lbf</option></select>
+        <label>Display units</label>
+        <select id="dispUnits2"><option value="N" selected>N</option><option value="kg">kg</option><option value="g">g</option><option value="lbf">lbf</option></select>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="row" style="align-items:flex-end;">
+      <div class="row" style="gap:10px;">
+        <div>
+          <label>Known value</label><br/>
+          <input id="knownValue" type="number" step="any" placeholder="e.g., 0.500 (kg) or 5 (N)" style="width:160px" />
+        </div>
+        <button id="capturePointBtn" class="btn-capture">Capture point</button>
+        <button id="applyCalBtn" class="btn-apply-stream">Apply to stream</button>
+        <button id="removeLastBtn">Remove last</button>
+        <button id="clearPointsBtn">Clear all</button>
+        <button id="downloadPointsBtn" class="btn-dl-green">Download points CSV</button>
+        <span class="muted tiny">Tip: enter <b>0</b> to capture your zero.</span>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="row" style="flex-wrap:wrap; gap:16px;">
+      <div style="flex:2 1 480px;">
+        <canvas id="scatter" width="1000" height="280"></canvas>
+      </div>
+      <div style="flex:1 1 280px;">
+        <div class="muted">Fit results (force in Newtons)</div>
+        <table>
+          <tbody>
+            <tr><th>Equation</th><td id="eqn">N = a + b · raw</td></tr>
+            <tr><th>a (intercept)</th><td id="aVal">—</td></tr>
+            <tr><th>b (slope)</th><td id="bVal">—</td></tr>
+            <tr><th>R²</th><td id="r2Val">—</td></tr>
+            <tr><th>RMSE (N)</th><td id="rmseVal">—</td></tr>
+            <tr><th>N points</th><td id="nVal">0</td></tr>
+            <tr><th>HX711 offset</th><td id="x0Val">—</td></tr>
+            <tr><th>HX711 scale</th><td id="scaleVal">—</td></tr>
+          </tbody>
+        </table>
+
+        <div class="sep"></div>
+
+        <div class="row">
+          <button id="fitBtn">Compute fit</button>
+          <button id="clearCalBtn">Clear calibration</button>
+          <button id="saveCalBtn">Save</button>
+          <button id="loadCalBtn">Load</button>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="muted tiny">Optional (if your sketch supports commands)</div>
+        <div class="row">
+          <button id="sendToArduinoBtn">Send to Arduino</button>
+          <span id="arduinoHint" class="muted tiny"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <div class="muted">Captured points</div>
+      <div class="tiny muted">Each row: (raw, N, entered)</div>
+      <table id="pointsTable">
+        <thead><tr><th>#</th><th>raw</th><th>N</th><th>entered</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== constants & helpers ===== */
+const G0=9.80665, LBF_TO_N=4.4482216152605, N_TO_LBF=1/LBF_TO_N;
+const toN = (v,u)=> u==='N'?v : u==='kg'? v*G0 : u==='g'? v*(G0/1000) : u==='lbf'? v*LBF_TO_N : NaN;
+const fromN = (n,u)=> u==='N'?n : u==='kg'? n/G0 : u==='g'? (n/G0)*1000 : u==='lbf'? n*N_TO_LBF : NaN;
+const cssVar = n=> getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmtTS = d=> d.toISOString().replace(/[-:T.Z]/g,'').slice(0,15);
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const prec = { N:3, kg:1, g:0, lbf:1 };
+
+function applyPrecFromUI(){
+  prec.N   = clamp(Number(document.getElementById('precN').value||3),0,8);
+  prec.kg  = clamp(Number(document.getElementById('precKg').value||1),0,8);
+  prec.g   = clamp(Number(document.getElementById('precG').value||0),0,8);
+  prec.lbf = clamp(Number(document.getElementById('precLbf').value||1),0,8);
+}
+['precN','precKg','precG','precLbf'].forEach(id=>{
+  document.addEventListener('input', e=>{
+    if(e.target && e.target.id===id){ applyPrecFromUI(); drawTimeSeries(); }
+  });
+});
+function fix(v,d){ return Number.isFinite(v) ? v.toFixed(d) : '—'; }
+
+/* ===== line-break transformer ===== */
+class LineBreakTransformer{
+  constructor(){ this.container=''; }
+  transform(chunk,controller){ this.container+=chunk; const lines=this.container.split(/\r?\n/); this.container=lines.pop(); for(const l of lines) controller.enqueue(l); }
+  flush(controller){ if(this.container) controller.enqueue(this.container); }
+}
+
+/* ===== UI refs ===== */
+const ui = {
+  connectBtn: document.getElementById('connectBtn'),
+  disconnectBtn: document.getElementById('disconnectBtn'),
+  status: document.getElementById('status'),
+  jumpToCal: document.getElementById('jumpToCal'),
+  supportMsg: document.getElementById('supportMsg'),
+  baud: document.getElementById('baud'), databits: document.getElementById('databits'),
+  parity: document.getElementById('parity'), stopbits: document.getElementById('stopbits'),
+  applyBtn: document.getElementById('applyBtn'), tx: document.getElementById('tx'),
+  sendBtn: document.getElementById('sendBtn'),
+
+  latestRaw: document.getElementById('latestRaw'),
+  latestCalN: document.getElementById('latestCalN'),
+  dispUnits: document.getElementById('dispUnits'),
+  latestCalDisp: document.getElementById('latestCalDisp'),
+  count: document.getElementById('count'),
+  rate: document.getElementById('rate'),
+  calibActive: document.getElementById('calibActive'),
+  filePrefix: document.getElementById('filePrefix'),
+  recordBtn: document.getElementById('recordBtn'),
+  downloadBtn: document.getElementById('downloadBtn'),
+  recStatus: document.getElementById('recStatus'),
+  chart: document.getElementById('chart'),
+  chartWrap: document.getElementById('chartWrap'),
+  tooltip: document.getElementById('tooltip'),
+  logRaw: document.getElementById('logRaw'),
+  logCal: document.getElementById('logCal'),
+  copyRaw: document.getElementById('copyRaw'),
+  copyCal: document.getElementById('copyCal'),
+  copiedRaw: document.getElementById('copiedRaw'),
+  copiedCal: document.getElementById('copiedCal'),
+
+  knownValue: document.getElementById('knownValue'),
+  knownUnits: document.getElementById('knownUnits'),
+  capturePointBtn: document.getElementById('capturePointBtn'),
+  removeLastBtn: document.getElementById('removeLastBtn'),
+  clearPointsBtn: document.getElementById('clearPointsBtn'),
+  downloadPointsBtn: document.getElementById('downloadPointsBtn'),
+  scatter: document.getElementById('scatter'),
+  aVal: document.getElementById('aVal'), bVal: document.getElementById('bVal'),
+  r2Val: document.getElementById('r2Val'), rmseVal: document.getElementById('rmseVal'),
+  nVal: document.getElementById('nVal'), eqn: document.getElementById('eqn'),
+  x0Val: document.getElementById('x0Val'), scaleVal: document.getElementById('scaleVal'),
+  fitBtn: document.getElementById('fitBtn'),
+  applyCalBtn: document.getElementById('applyCalBtn'),
+  clearCalBtn: document.getElementById('clearCalBtn'),
+  saveCalBtn: document.getElementById('saveCalBtn'),
+  loadCalBtn: document.getElementById('loadCalBtn'),
+  sendToArduinoBtn: document.getElementById('sendToArduinoBtn'),
+  pointsTable: document.querySelector('#pointsTable tbody'),
+
+  recordingsList: document.getElementById('recordingsList'),
+  streamCard: document.getElementById('streamCard'),
+};
+
+function setStatus(text, klass=''){ ui.status.textContent=text; ui.status.className='pill '+(klass||''); }
+function appendLog(el, s, max=1000){
+  el.textContent += s + '\n';
+  const linesCount = (el.textContent.match(/\n/g)||[]).length;
+  if(linesCount > max){
+    const trimmed = el.textContent.split('\n');
+    el.textContent = trimmed.slice(Math.max(0, trimmed.length - (max+1))).join('\n');
+  }
+  el.scrollTop = el.scrollHeight;
+}
+const logRawLine = s => appendLog(ui.logRaw, `[${new Date().toISOString()}] ${s}`);
+const logCalLine = n => appendLog(ui.logCal, `[${new Date().toISOString()}] ${n.toFixed(6)} N`);
+
+/* ===== State ===== */
+let port=null, reader=null, inputDone=null, outputStream=null, writer=null;
+let running=false, samples=[], startTime=0, lastTickCount=0, lastTickTime=0;
+let calib = { a:0, b:1, active:false };
+let points = [];
+let calculated=null;
+
+let recording=false, currentRows=[], lastDownload={name:null,url:null};
+let recordings=[];
+
+/* ===== Support check ===== */
+if(!('serial' in navigator)){
+  ui.supportMsg.innerHTML = `<span style="color:#b91c1c">Web Serial is not available. Use Chrome/Edge on desktop.</span>`;
+} else {
+  ui.supportMsg.innerHTML = `<span style="color:#059669">Web Serial is supported.</span>`;
+}
+
+/* ===== Charts ===== */
+const ctx = ui.chart.getContext('2d');
+const CHART_PAD_L = 180; // extra for multi-unit labels
+
+function drawTimeSeries(){
+  const w=ui.chart.width, h=ui.chart.height;
+  ctx.clearRect(0,0,w,h);
+  if(!calib.active){
+    ctx.fillStyle = cssVar('--uncal-bg') || '#fff7a8';
+    ctx.fillRect(0,0,w,h);
+  }
+
+  let yMin=0, yMax=1, haveData=false, slice=[];
+  if(samples.length>=2){
+    const N=Math.min(samples.length,1000);
+    slice=samples.slice(samples.length-N);
+    const vals = slice.map(s=>s.v).filter(Number.isFinite);
+    if(vals.length){
+      const vmin=Math.min(...vals), vmax=Math.max(...vals);
+      const pad=(vmax-vmin)*0.1 || 1; yMin=vmin-pad; yMax=vmax+pad; haveData=true;
+
+      const tMin=slice[0].t, tMax=slice[slice.length-1].t;
+      drawRecordingOverlays(tMin, tMax, w, h);
+
+      ctx.lineWidth=2; ctx.strokeStyle=cssVar('--accent'); ctx.beginPath();
+      slice.forEach((s,i)=>{
+        const x = CHART_PAD_L + (i/(slice.length-1))*(w-CHART_PAD_L);
+        const y = mapY(s.v,yMin,yMax,h);
+        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.stroke();
+
+      ctx.fillStyle='#64748b'; ctx.font='12px ui-monospace, monospace';
+      ctx.fillText(`min: ${vmin.toFixed(3)}   max: ${vmax.toFixed(3)}`, CHART_PAD_L+8, 16);
+    }
+  }
+
+  drawGridAndYAxis(yMin,yMax,w,h,haveData);
+}
+
+function mapY(v,yMin,yMax,h){ return h - ((v - yMin)/(yMax - yMin))*h; }
+
+function drawGridAndYAxis(yMin,yMax,w,h,haveData){
+  ctx.strokeStyle = cssVar('--grid'); ctx.lineWidth=1;
+  for(let x=CHART_PAD_L;x<=w;x+=90){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+  const lines=10;
+  ctx.font='12px ui-monospace, monospace'; ctx.fillStyle='#64748b';
+
+  for(let i=0;i<=lines;i++){
+    const t=i/lines;
+    const y = Math.round((1-t)*h);
+    ctx.beginPath(); ctx.moveTo(CHART_PAD_L,y); ctx.lineTo(w,y); ctx.stroke();
+
+    if(!haveData) continue;
+    const rawVal = yMin + (t)*(yMax-yMin);
+
+    if(calib.active){
+      const n = calib.a + calib.b*rawVal;
+      const kg = n/G0; const g = (n/G0)*1000; const lbf = n*N_TO_LBF;
+      ctx.fillText(`${fix(kg,prec.kg)} kg`, 6,  Math.min(h-2, y-2));
+      ctx.fillText(`${fix(n,prec.N)} N`,   70, Math.min(h-2, y-2));
+      ctx.fillText(`${fix(lbf,prec.lbf)} lbf`,120, Math.min(h-2, y-2));
+      // grams shown in tooltip & display (not cluttering y-axis further)
+    }else{
+      ctx.fillText(rawVal.toFixed(3), 6, Math.min(h-2, y-2));
+    }
+  }
+  ctx.beginPath(); ctx.moveTo(CHART_PAD_L,0); ctx.lineTo(CHART_PAD_L,h); ctx.stroke();
+}
+
+function drawRecordingOverlays(tMin,tMax,w,h){
+  clearPins();
+  const wrap = ui.chartWrap;
+  const spanW = (w-CHART_PAD_L);
+  const toX = t => CHART_PAD_L + ((t - tMin) / (tMax - tMin)) * spanW;
+
+  recordings.forEach(rec=>{
+    const s = rec.tStart, e = rec.tEnd ?? performance.now() - startTime;
+    if(e < tMin || s > tMax) return;
+    const xs = Math.max(CHART_PAD_L, toX(Math.max(s,tMin)));
+    const xe = Math.min(w, toX(Math.min(e,tMax)));
+    ctx.fillStyle = cssVar('--overlay') || 'rgba(239,68,68,.3)';
+    ctx.fillRect(xs, 0, Math.max(2, xe - xs), h);
+
+    const mid = xs + (xe - xs)/2;
+    const a = document.createElement('a');
+    a.className='file-pin';
+    a.style.left=`${mid}px`;
+    a.title = rec.name;
+    a.textContent = '📄';
+    a.href = rec.url; a.download = rec.name;
+    wrap.appendChild(a);
+  });
+
+  if(recording){
+    const s = currentRecStartMs, e = performance.now() - startTime;
+    if(!(e < tMin || s > tMax)){
+      const xs = Math.max(CHART_PAD_L, toX(Math.max(s,tMin)));
+      const xe = Math.min(w, toX(Math.min(e,tMax)));
+      ctx.fillStyle = cssVar('--overlay') || 'rgba(239,68,68,.3)';
+      ctx.fillRect(xs, 0, Math.max(2, xe - xs), h);
+      const mid = xs + (xe - xs)/2;
+      const a=document.createElement('span'); a.className='file-pin'; a.style.left=`${mid}px`; a.title=pendingName; a.textContent='📄';
+      ui.chartWrap.appendChild(a);
+    }
+  }
+}
+function clearPins(){ [...ui.chartWrap.querySelectorAll('.file-pin')].forEach(n=>n.remove()); }
+
+function tickRateUpdate(){
+  const now=performance.now(); const dt=(now-lastTickTime)/1000;
+  const dN=samples.length-lastTickCount; const rate=dt>0? dN/dt : 0;
+  ui.rate.textContent = `${rate.toFixed(1)}/s`;
+  lastTickTime=now; lastTickCount=samples.length;
+}
+
+/* ===== Mouse hover tooltip with precision ===== */
+ui.chart.addEventListener('mousemove', (e)=>{
+  if(samples.length<2) return;
+  const rect = ui.chart.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  if(x < CHART_PAD_L) { ui.tooltip.style.display='none'; return; }
+
+  const N=Math.min(samples.length,1000);
+  const slice=samples.slice(samples.length-N);
+  const idx = clamp(Math.round(((x-CHART_PAD_L)/(ui.chart.width-CHART_PAD_L))*(N-1)),0,N-1);
+  const s = slice[idx];
+  const raw = s.v;
+  let tip = `t≈${Math.round(s.t)} ms | raw ${raw.toFixed(6)}`;
+  if(calib.active){
+    const n = calib.a + calib.b*raw;
+    tip += ` | ${fix(n,prec.N)} N | ${fix(n/G0,prec.kg)} kg | ${fix((n/G0)*1000,prec.g)} g | ${fix(n*N_TO_LBF,prec.lbf)} lbf`;
+  }
+  ui.tooltip.style.display='block';
+  ui.tooltip.style.left = `${e.clientX - rect.left + 8}px`;
+  ui.tooltip.style.top  = `${e.clientY - rect.top  - 8}px`;
+  ui.tooltip.textContent = tip;
+});
+ui.chart.addEventListener('mouseleave', ()=>{ ui.tooltip.style.display='none'; });
+
+/* ===== Scatter (calibration) ===== */
+const sctx = ui.scatter.getContext('2d');
+function drawScatter(){
+  const w=ui.scatter.width, h=ui.scatter.height, padL=56, pad=40;
+  sctx.clearRect(0,0,w,h);
+
+  let xr=[0,1], yr=[0,1];
+  if(points.length>0){
+    const xs=points.map(p=>p.x), ys=points.map(p=>p.yN);
+    const xmin=Math.min(...xs), xmax=Math.max(...xs);
+    const ymin=Math.min(...ys), ymax=Math.max(...ys);
+    const xpad=(xmax-xmin)*0.1 || 1, ypad=(ymax-ymin)*0.1 || 1;
+    xr=[xmin-xpad, xmax+xpad]; yr=[ymin-ypad, ymax+ypad];
+  }
+
+  sctx.strokeStyle=cssVar('--grid'); sctx.lineWidth=1;
+  sctx.strokeRect(padL,pad,w-padL-pad,h-2*pad);
+
+  const lines=10; sctx.font='12px ui-monospace, monospace'; sctx.fillStyle='#64748b';
+  for(let i=0;i<=lines;i++){
+    const t=i/lines;
+    const y=pad + (1-t)*(h-2*pad);
+    sctx.beginPath(); sctx.moveTo(padL,y); sctx.lineTo(w-pad,y); sctx.stroke();
+    const val= yr[0] + t*(yr[1]-yr[0]);
+    sctx.fillText(Number.isFinite(val)?`${fix(val,prec.N)} N  (${fix(val/G0,prec.kg)} kg / ${fix(val*N_TO_LBF,prec.lbf)} lbf)`:'' , 6, y-2);
+  }
+
+  const X = x=>padL + ((x - xr[0])/(xr[1]-xr[0]))*(w-padL-pad);
+  const Y = y=>pad + (1-((y - yr[0])/(yr[1]-yr[0])))*(h-2*pad);
+
+  sctx.fillStyle = cssVar('--text');
+  points.forEach(p=>{ sctx.beginPath(); sctx.arc(X(p.x), Y(p.yN), 3, 0, Math.PI*2); sctx.fill(); });
+
+  if(calculated){
+    const xs=[xr[0], xr[1]], ys=xs.map(x=>calculated.a + calculated.b*x);
+    sctx.strokeStyle=cssVar('--accent'); sctx.lineWidth=2; sctx.beginPath();
+    sctx.moveTo(X(xs[0]), Y(ys[0])); sctx.lineTo(X(xs[1]), Y(ys[1])); sctx.stroke();
+  }
+
+  sctx.fillStyle='#64748b'; sctx.fillText('raw', w/2 - 10, h-12);
+  sctx.save(); sctx.translate(12,h/2); sctx.rotate(-Math.PI/2); sctx.fillText('N (Newton)', 0, 0); sctx.restore();
+}
+
+/* ===== Fit ===== */
+const mean = arr => arr.length? arr.reduce((a,b)=>a+b,0)/arr.length : NaN;
+function computeFit(){
+  if(points.length<2){ calculated=null; updateFitUI(); drawScatter(); return; }
+  const xs=points.map(p=>p.x), ys=points.map(p=>p.yN), n=xs.length;
+  const xbar=mean(xs), ybar=mean(ys);
+  let Sxx=0,Sxy=0,Syy=0;
+  for(let i=0;i<n;i++){ const dx=xs[i]-xbar, dy=ys[i]-ybar; Sxx+=dx*dx; Sxy+=dx*dy; Syy+=dy*dy; }
+  const b = Sxx===0?0:Sxy/Sxx, a=ybar-b*xbar;
+  const yhat = xs.map(x=>a+b*x);
+  const ssRes = ys.reduce((s,y,i)=>s+(y-yhat[i])**2,0);
+  const r2 = (Syy===0)?1:1-(ssRes/Syy);
+  const rmse = Math.sqrt(ssRes/n);
+  const x0 = (b!==0)?(-a/b):NaN, scale=(b!==0)?(1/b):NaN;
+  calculated={a,b,r2,rmse,n,x0,scale}; updateFitUI(); drawScatter();
+}
+function fmt(v){ return Number.isFinite(v)?((Math.abs(v)<1e-3||Math.abs(v)>1e5)?v.toExponential(4):v.toFixed(6)):'—'; }
+function updateFitUI(){
+  const A=ui.aVal,B=ui.bVal,R2=ui.r2Val,RM=ui.rmseVal,N=ui.nVal,EQ=ui.eqn,X0=ui.x0Val,SC=ui.scaleVal, H=document.getElementById('arduinoHint');
+  if(!calculated){ A.textContent=B.textContent=R2.textContent=RM.textContent='—'; N.textContent=String(points.length); EQ.textContent='N = a + b · raw'; X0.textContent=SC.textContent='—'; H.textContent=''; return; }
+  A.textContent=fmt(calculated.a); B.textContent=fmt(calculated.b); R2.textContent=fmt(calculated.r2); RM.textContent=fmt(calculated.rmse);
+  N.textContent=String(calculated.n); EQ.textContent=`N = ${fmt(calculated.a)} + ${fmt(calculated.b)} · raw`;
+  X0.textContent=Number.isFinite(calculated.x0)?fmt(calculated.x0):'—'; SC.textContent=Number.isFinite(calculated.scale)?fmt(calculated.scale):'—';
+  H.textContent = (Number.isFinite(calculated.x0)&&Number.isFinite(calculated.scale)) ? `Try: SET_OFFSET ${fmt(calculated.x0)}  •  SET_SCALE ${calculated.scale}` : '';
+}
+
+/* ===== Calibration actions ===== */
+function captureLatestRaw(){
+  const v = samples.length ? samples[samples.length-1].v : NaN;
+  return Number.isFinite(v) ? v : NaN;
+}
+function refreshPointsTable(){
+  const tb=ui.pointsTable; tb.innerHTML='';
+  points.forEach((p,i)=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${i+1}</td><td>${p.x.toFixed(6)}</td><td>${p.yN.toFixed(6)}</td><td>${p.entered.toFixed(6)} ${p.unit}</td>`; tb.appendChild(tr); });
+  drawScatter(); computeFit();
+}
+
+/* ===== Copy utilities ===== */
+async function copyElText(el, badge){
+  try{ await navigator.clipboard.writeText(el.textContent); badge.classList.add('show'); setTimeout(()=>badge.classList.remove('show'), 900); }catch(e){}
+}
+
+/* ===== Serial connect / read ===== */
+function getUIConfig(){ return { baudRate:Number(ui.baud.value), dataBits:Number(ui.databits.value), parity:ui.parity.value, stopBits:Number(ui.stopbits.value), flowControl:'none' }; }
+async function connect(){
+  try{
+    port=await navigator.serial.requestPort(); await port.open(getUIConfig());
+    setStatus('Connected','ok'); ui.connectBtn.disabled=true; ui.disconnectBtn.disabled=false; ui.applyBtn.disabled=true;
+    if(port.writable){ outputStream=port.writable; writer=outputStream.getWriter(); }
+    startReading();
+  }catch(err){ setStatus('Failed to connect'); logRawLine('ERROR: '+err.message); }
+}
+async function applySettings(){
+  if(!port){ setStatus('Not connected'); return; }
+  try{ if(reader) await stopReading(); await port.close(); await port.open(getUIConfig()); setStatus('Reopened','ok'); startReading(); }
+  catch(err){ setStatus('Failed to apply'); logRawLine('ERROR: '+err.message); }
+}
+async function disconnect(){
+  try{ await stopReading(); if(writer){ try{writer.releaseLock();}catch{} } if(port){ try{await port.close();}catch{} } }
+  finally{ port=null; writer=null; outputStream=null; setStatus('Not connected'); ui.connectBtn.disabled=false; ui.disconnectBtn.disabled=true; ui.applyBtn.disabled=false; }
+}
+async function startReading(){
+  running=true; startTime=performance.now(); lastTickTime=startTime; lastTickCount=0;
+  const textDecoder=new TextDecoderStream(); inputDone=port.readable.pipeTo(textDecoder.writable);
+  const inputStream = textDecoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer()));
+  reader=inputStream.getReader(); logRawLine('Reading started');
+  (async ()=>{
+    try{
+      while(running){
+        const {value,done}=await reader.read(); if(done) break; if(value===undefined) continue;
+        const t=performance.now()-startTime; const num=Number(value.trim());
+        if(!Number.isNaN(num)){
+          samples.push({t,v:num}); ui.latestRaw.textContent=num.toFixed(6);
+          let nVal=NaN;
+          if(calib.active){
+            nVal=calib.a + calib.b*num;
+            if(Number.isFinite(nVal)){
+              ui.latestCalN.textContent=`${fix(nVal,prec.N)} N`;
+              const dispU=ui.dispUnits.value;
+              const disp=fromN(nVal, dispU);
+              const dprec = dispU==='N'?prec.N : dispU==='kg'?prec.kg : dispU==='g'?prec.g : prec.lbf;
+              ui.latestCalDisp.textContent=Number.isFinite(disp)? `${fix(disp,dprec)} ${dispU}` : '—';
+              logCalLine(nVal);
+            }
+          }
+          ui.count.textContent=String(samples.length);
+          if(recording){ const iso=new Date().toISOString(); currentRows.push([iso, Math.round(t), num, Number.isFinite(nVal)?nVal:'']); }
+        }
+        logRawLine(value);
+        if(samples.length%2===0) drawTimeSeries();
+        if(samples.length%20===0) tickRateUpdate();
+      }
+    }catch(err){ logRawLine('ERROR: '+err.message); setStatus('Read error'); }
+    finally{ logRawLine('Reading stopped'); }
+  })();
+}
+async function stopReading(){ running=false; try{ if(reader) await reader.cancel(); }catch{} try{ if(inputDone) await inputDone; }catch{} reader=null; inputDone=null; }
+
+/* ===== Recording ===== */
+let currentRecStartMs=0, pendingName='recording.csv';
+function toggleRecordingUI(on){
+  if(on){ ui.recordBtn.classList.remove('btn-rec-off'); ui.recordBtn.classList.add('btn-rec-on'); ui.recordBtn.innerHTML=`<span class="rec-dot"></span>Recording`; ui.recStatus.textContent='Recording…'; }
+  else { ui.recordBtn.classList.remove('btn-rec-on'); ui.recordBtn.classList.add('btn-rec-off'); ui.recordBtn.textContent='Record'; ui.recStatus.textContent='Not recording'; }
+}
+function startRecording(){
+  recording=true; currentRows=[["timestamp_iso","t_ms","raw","calibrated_N"]];
+  currentRecStartMs = performance.now() - startTime;
+  const prefix=(ui.filePrefix.value && ui.filePrefix.value.trim())?ui.filePrefix.value.trim():'serial_log';
+  pendingName = `${prefix}_${fmtTS(new Date())}.csv`;
+  toggleRecordingUI(true); ui.downloadBtn.disabled=true; drawTimeSeries();
+}
+function stopRecording(){
+  recording=false; toggleRecordingUI(false);
+  const tEnd = performance.now() - startTime;
+  const csv=currentRows.map(r=>r.join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const rec={ startISO:new Date(Date.now() - (tEnd-currentRecStartMs)).toISOString(), endISO:new Date().toISOString(), tStart:currentRecStartMs, tEnd, name:pendingName, url };
+  recordings.push(rec);
+  lastDownload={name:rec.name,url:rec.url};
+  ui.downloadBtn.disabled=false;
+  updateRecordingsList();
+  drawTimeSeries();
+}
+function updateRecordingsList(){
+  if(recordings.length===0){ ui.recordingsList.textContent='No recordings yet.'; return; }
+  const container=document.createElement('div');
+  recordings.forEach((r)=>{
+    const item=document.createElement('div'); item.style.marginBottom='6px';
+    const a=document.createElement('a'); a.href=r.url; a.download=r.name; a.textContent='📄 ' + r.name;
+    const meta=document.createElement('span'); meta.className='muted'; meta.textContent=`  —  ${r.startISO} → ${r.endISO}`;
+    item.appendChild(a); item.appendChild(meta); container.appendChild(item);
+  });
+  ui.recordingsList.innerHTML=''; ui.recordingsList.appendChild(container);
+}
+function downloadLast(){
+  if(!lastDownload.url) return;
+  const a=document.createElement('a'); a.href=lastDownload.url; a.download=lastDownload.name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+/* ===== Events ===== */
+ui.jumpToCal.addEventListener('click', ()=>{
+  document.getElementById('calSection').scrollIntoView({behavior:'smooth', block:'start'});
+  const el=document.getElementById('calSection'); const old=el.style.boxShadow; el.style.boxShadow='0 0 0 3px rgba(99,102,241,.35) inset'; setTimeout(()=>el.style.boxShadow=old, 800);
+});
+
+ui.connectBtn.addEventListener('click', async()=>{ if(!('serial' in navigator)){ alert('Web Serial not supported here.'); return; } await connect(); });
+ui.disconnectBtn.addEventListener('click', disconnect);
+ui.applyBtn.addEventListener('click', applySettings);
+ui.sendBtn.addEventListener('click', async()=>{
+  if(!writer){ logRawLine('Cannot send: writer not ready'); return; }
+  const txt=ui.tx.value||''; if(!txt) return;
+  try{ const enc=new TextEncoder(); await writer.write(enc.encode(txt+'\n')); logRawLine('> '+txt); ui.tx.value=''; }catch(err){ logRawLine('ERROR sending: '+err.message); }
+});
+ui.dispUnits.addEventListener('change', ()=>{ /* display only */ });
+
+ui.recordBtn.addEventListener('click', ()=> recording ? stopRecording() : startRecording());
+ui.downloadBtn.addEventListener('click', downloadLast);
+
+ui.copyRaw.addEventListener('click', ()=>copyElText(ui.logRaw, ui.copiedRaw));
+ui.copyCal.addEventListener('click', ()=>copyElText(ui.logCal, ui.copiedCal));
+
+ui.capturePointBtn.addEventListener('click', ()=>{
+  const entered = parseFloat(ui.knownValue.value);
+  const unit = ui.knownUnits.value;
+  if(!Number.isFinite(entered)){ alert('Enter a known value. Use 0 to capture zero.'); return; }
+  const x = captureLatestRaw(); if(!Number.isFinite(x)){ alert('No sample yet.'); return; }
+  const yN = toN(entered, unit); if(!Number.isFinite(yN)){ alert('Bad unit.'); return; }
+  points.push({x, yN, entered, unit}); ui.knownValue.value=''; refreshPointsTable();
+});
+ui.removeLastBtn.addEventListener('click', ()=>{ points.pop(); refreshPointsTable(); });
+ui.clearPointsBtn.addEventListener('click', ()=>{ points.length=0; refreshPointsTable(); });
+ui.downloadPointsBtn.addEventListener('click', ()=>{
+  const header=['idx','raw','N','entered','unit']; const data=points.map((p,i)=>[i+1,p.x,p.yN,p.entered,p.unit]);
+  const csv=[header,...data].map(r=>r.join(',')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`calibration_points_${fmtTS(new Date())}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+});
+ui.fitBtn.addEventListener('click', computeFit);
+
+ui.applyCalBtn.addEventListener('click', ()=>{
+  if(!calculated){ computeFit(); if(!calculated){ alert('Compute fit first (need ≥2 points).'); return; } }
+  calib={a:calculated.a,b:calculated.b,active:true};
+  ui.calibActive.textContent='Calibrated'; ui.calibActive.classList.add('ok');
+  drawTimeSeries();
+  // jump back to stream
+  ui.streamCard.scrollIntoView({behavior:'smooth', block:'start'});
+});
+
+ui.clearCalBtn.addEventListener('click', ()=>{ calib.active=false; ui.calibActive.textContent='off'; ui.calibActive.classList.remove('ok'); ui.latestCalN.textContent='—'; ui.latestCalDisp.textContent='—'; drawTimeSeries(); });
+ui.saveCalBtn.addEventListener('click', ()=>{ if(!calculated){alert('Nothing to save.');return;} const pkg={calculated,points,ts:Date.now(),dispUnits:ui.dispUnits.value,prec}; localStorage.setItem('hx_calibration_units_v7', JSON.stringify(pkg)); alert('Saved.'); });
+ui.loadCalBtn.addEventListener('click', ()=>{
+  const s=localStorage.getItem('hx_calibration_units_v7'); ; if(!s){ alert('No saved calibration.'); return; }
+  try{ const pkg=JSON.parse(s); points=pkg.points||[]; if(pkg.calculated){ calculated=pkg.calculated; updateFitUI(); drawScatter(); } if(pkg.dispUnits){ ui.dispUnits.value=pkg.dispUnits; ui.dispUnits2.value=pkg.dispUnits; } refreshPointsTable(); alert('Loaded.'); }catch(e){ alert('Failed to load.'); }
+});
+ui.sendToArduinoBtn.addEventListener('click', async()=>{
+  if(!writer){ alert('Not connected.'); return; }
+  if(!calculated || !Number.isFinite(calculated.x0) || !Number.isFinite(calculated.scale)){ alert('Fit not valid.'); return; }
+  const enc=new TextEncoder(); try{ await writer.write(enc.encode(`SET_OFFSET ${calculated.x0}\n`)); await writer.write(enc.encode(`SET_SCALE ${calculated.scale}\n`)); logRawLine(`> SET_OFFSET ${calculated.x0}`); logRawLine(`> SET_SCALE ${calculated.scale}`); }catch(e){ logRawLine('ERROR sending: '+e.message); }
+});
+
+/* ===== Init ===== */
+drawTimeSeries(); drawScatter();
+ui.baud.value='38400';
+ui.calibActive.textContent='off';
+</script>
+</body>
+</html>

@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Serial Viewer + Calibration</title>
+<style>
+  /* THEME */
+  :root {
+    --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22d3ee;
+    --border:#1f2937; --grid:#1f2937; --ok:#34d399; --danger:#ef4444; --okbg:#065f46; --dangerbg:#7f1d1d;
+    --uncal-bg:#fff7c2; /* light yellow for uncalibrated plot */
+  }
+  :root[data-theme="light"]{
+    --bg:#f8fafc; --card:#ffffff; --muted:#475569; --text:#0f172a; --accent:#0ea5e9;
+    --border:#e5e7eb; --grid:#e2e8f0; --ok:#059669; --danger:#b91c1c; --okbg:#10b981; --dangerbg:#ef4444;
+    --uncal-bg:#fff7a8;
+  }
+  html,body { height:100%; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial; background:var(--bg); color:var(--text); }
+  .wrap { max-width:1200px; margin:24px auto; padding:0 16px; }
+  h1 { font-size:1.4rem; margin:0 0 12px; }
+  .grid { display:grid; gap:16px; grid-template-columns: 1fr; }
+  @media (min-width: 1080px) { .grid { grid-template-columns: 360px 1fr; } }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 10px 20px rgba(0,0,0,.08); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  label { font-size:.9rem; color:var(--muted); }
+  select, input[type="number"], input[type="text"] {
+    background:transparent; color:var(--text); border:1px solid var(--border); border-radius:10px;
+    padding:8px 10px; outline:none; min-width:90px;
+  }
+  button {
+    background:transparent; color:var(--text); border:1px solid var(--border); border-radius:12px; padding:10px 14px;
+    cursor:pointer; transition:transform .02s ease, background-color .15s ease, border-color .15s ease;
+  }
+  button:hover { border-color:#334155; } :root[data-theme="light"] button:hover { border-color:#cbd5e1; }
+  button:active { transform:translateY(1px); }
+  button.primary { border-color:var(--accent); }
+  .stat { font-size:2.0rem; font-variant-numeric:tabular-nums; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  .log { height:180px; overflow:auto; background:transparent; border:1px solid var(--border); border-radius:12px; padding:8px 10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.9rem; white-space:pre; }
+  canvas { width:100%; height:280px; background:transparent; border-radius:12px; border:1px solid var(--border); }
+  .pill { font-size:.8rem; padding:2px 8px; border:1px solid var(--border); border-radius:999px; color:var(--muted); }
+  .sep { height:1px; background:var(--border); margin:12px 0; }
+  .ok { color:var(--ok); }
+  .err { color:#f87171; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th, td { border-bottom:1px solid var(--border); padding:6px 8px; text-align:right; }
+  th:first-child, td:first-child, td:nth-child(2) { text-align:left; }
+  .tiny { font-size:.8rem; }
+  .chip { padding:2px 6px; border:1px solid var(--border); border-radius:8px; color:var(--muted); }
+
+  /* Record button states */
+  .btn-rec-off { background:var(--dangerbg); border-color:var(--dangerbg); color:#fff; }
+  .btn-rec-on  { background:var(--okbg);     border-color:var(--okbg);     color:#fff; }
+  .rec-dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--danger); margin-right:8px; transform:translateY(1px); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Serial Viewer + Calibration</h1>
+
+  <div class="grid">
+    <!-- Controls -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div class="row">
+          <button id="connectBtn" class="primary">Connect</button>
+          <button id="disconnectBtn" disabled>Disconnect</button>
+          <span id="status" class="pill">Not connected</span>
+        </div>
+        <div class="row">
+          <label>Theme</label>
+          <select id="themeSel">
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="auto">Auto</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="row">
+        <label for="baud">Baud</label>
+        <select id="baud">
+          <option>9600</option>
+          <option>19200</option>
+          <option selected>38400</option>
+          <option>57600</option>
+          <option>115200</option>
+          <option>230400</option>
+        </select>
+
+        <label for="databits">Data bits</label>
+        <select id="databits">
+          <option selected>8</option>
+          <option>7</option>
+        </select>
+
+        <label for="parity">Parity</label>
+        <select id="parity">
+          <option selected>none</option>
+          <option>even</option>
+          <option>odd</option>
+        </select>
+
+        <label for="stopbits">Stop bits</label>
+        <select id="stopbits">
+          <option selected>1</option>
+          <option>2</option>
+        </select>
+      </div>
+
+      <div class="row" style="margin-top:8px;">
+        <button id="applyBtn">Apply settings</button>
+        <span class="muted">Sketch default <b>38400</b>.</span>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="row">
+        <label>Send command</label>
+        <input id="tx" type="text" placeholder="e.g., TARE or SET_SCALE 123.45" />
+        <button id="sendBtn">Send</button>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="row" style="align-items:flex-end; gap:10px;">
+        <div>
+          <label class="tiny">CSV name prefix (optional)</label><br/>
+          <input id="filePrefix" type="text" placeholder="serial_log" style="min-width:180px" />
+        </div>
+        <div class="row" style="gap:8px; align-items:center;">
+          <button id="recordBtn" class="btn-rec-off">Record</button>
+          <button id="downloadBtn" disabled>Download CSV</button>
+          <span id="recStatus" class="muted">Not recording</span>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div>
+        <div class="muted">Browser support</div>
+        <div id="supportMsg" class="muted"></div>
+      </div>
+    </div>
+
+    <!-- Live Display -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between; flex-wrap:wrap;">
+        <div>
+          <div class="muted">Latest (raw)</div>
+          <div id="latestRaw" class="stat">—</div>
+        </div>
+        <div>
+          <div class="muted">Calibrated (N)</div>
+          <div id="latestCalN" class="stat">—</div>
+        </div>
+        <div>
+          <div class="row" style="gap:6px; align-items:center;">
+            <div class="muted">Display units</div>
+            <select id="dispUnits">
+              <option value="N" selected>N</option>
+              <option value="kg">kg</option>
+              <option value="g">g</option>
+              <option value="lbf">lbf</option>
+            </select>
+          </div>
+          <div id="latestCalDisp" class="stat">—</div>
+        </div>
+        <div>
+          <div class="muted">Samples</div>
+          <div id="count" class="stat">0</div>
+        </div>
+        <div>
+          <div class="muted">Rate (approx)</div>
+          <div id="rate" class="stat">0/s</div>
+        </div>
+        <div>
+          <div class="muted inline">Calibration <span id="calibActive" class="chip">off</span></div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <canvas id="chart" width="1000" height="280"></canvas>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="row" style="gap:16px;">
+        <div style="flex:1;">
+          <div class="muted">Raw log</div>
+          <div id="logRaw" class="log"></div>
+        </div>
+        <div style="flex:1;">
+          <div class="muted">Calibrated force log (N)</div>
+          <div id="logCal" class="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sep" style="margin:18px 0;"></div>
+
+  <!-- Calibration -->
+  <div class="card">
+    <div class="row" style="justify-content:space-between;">
+      <div class="row">
+        <h2 style="margin:0;">Calibration</h2>
+        <span class="muted">Fit <em>N</em> = a + b · raw &nbsp; (capture zero by entering known=0)</span>
+      </div>
+      <div class="row">
+        <label>Avg samples</label><input id="avgN" type="number" value="1" min="1" style="width:80px" />
+        <label>Known value units</label>
+        <select id="knownUnits" title="Units for known value">
+          <option value="kg" selected>kg</option>
+          <option value="g">g</option>
+          <option value="N">N</option>
+          <option value="lbf">lbf</option>
+        </select>
+        <label>Display units</label>
+        <select id="dispUnits2">
+          <option value="N" selected>N</option>
+          <option value="kg">kg</option>
+          <option value="g">g</option>
+          <option value="lbf">lbf</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="row" style="align-items:flex-end;">
+      <div class="row" style="gap:10px;">
+        <div>
+          <label>Known value</label><br/>
+          <input id="knownValue" type="number" step="any" placeholder="e.g., 0.500 (kg) or 5 (N)" style="width:160px" />
+        </div>
+        <button id="capturePointBtn" class="primary">Capture point</button>
+        <button id="removeLastBtn">Remove last</button>
+        <button id="clearPointsBtn">Clear all</button>
+        <button id="downloadPointsBtn">Download points CSV</button>
+        <span class="muted tiny">Tip: enter <b>0</b> to capture your zero point.</span>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="row" style="flex-wrap:wrap; gap:16px;">
+      <div style="flex:2 1 480px;">
+        <canvas id="scatter" width="1000" height="280"></canvas>
+      </div>
+      <div style="flex:1 1 280px;">
+        <div class="muted">Fit results (force in Newtons)</div>
+        <table>
+          <tbody>
+            <tr><th>Equation</th><td id="eqn">N = a + b · raw</td></tr>
+            <tr><th>a (intercept)</th><td id="aVal">—</td></tr>
+            <tr><th>b (slope)</th><td id="bVal">—</td></tr>
+            <tr><th>R²</th><td id="r2Val">—</td></tr>
+            <tr><th>RMSE (N)</th><td id="rmseVal">—</td></tr>
+            <tr><th>N points</th><td id="nVal">0</td></tr>
+            <tr><th>HX711 offset</th><td id="x0Val">—</td></tr>
+            <tr><th>HX711 scale</th><td id="scaleVal">—</td></tr>
+          </tbody>
+        </table>
+
+        <div class="sep"></div>
+
+        <div class="row">
+          <button id="fitBtn" class="primary">Compute fit</button>
+          <button id="applyCalBtn">Apply to stream</button>
+          <button id="clearCalBtn">Clear calibration</button>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="muted tiny">Persist</div>
+        <div class="row">
+          <button id="saveCalBtn">Save calibration</button>
+          <button id="loadCalBtn">Load calibration</button>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="muted tiny">Optional (if your sketch supports commands)</div>
+        <div class="row">
+          <button id="sendToArduinoBtn">Send to Arduino</button>
+          <span id="arduinoHint" class="muted tiny"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div>
+      <div class="muted">Captured points</div>
+      <div class="tiny muted">Each row: (raw, N, entered)</div>
+      <table id="pointsTable">
+        <thead><tr><th>#</th><th>raw</th><th>N</th><th>entered</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== Utils & Theme ===== */
+const G0 = 9.80665; // m/s^2
+const LBF_TO_N = 4.4482216152605;
+const N_TO_LBF = 1 / LBF_TO_N;
+
+function toN(val, unit){
+  switch(unit){
+    case 'N': return val;
+    case 'kg': return val * G0;
+    case 'g':  return val * (G0/1000);
+    case 'lbf': return val * LBF_TO_N;
+    default: return NaN;
+  }
+}
+function fromN(valN, unit){
+  switch(unit){
+    case 'N': return valN;
+    case 'kg': return valN / G0;
+    case 'g':  return (valN / G0) * 1000;
+    case 'lbf': return valN * N_TO_LBF;
+    default: return NaN;
+  }
+}
+function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function initTheme(){
+  const sel = document.getElementById('themeSel');
+  const saved = localStorage.getItem('serial_theme') || 'dark';
+  sel.value = saved;
+  applyTheme(saved);
+  sel.addEventListener('change', ()=>{ const v=sel.value; localStorage.setItem('serial_theme', v); applyTheme(v); drawTimeSeries(); drawScatter(); });
+}
+function applyTheme(mode){
+  if(mode==='auto'){
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    document.documentElement.setAttribute('data-theme', mq.matches ? 'light' : 'dark');
+  } else {
+    document.documentElement.setAttribute('data-theme', mode==='light' ? 'light' : 'dark');
+  }
+}
+
+/* ===== Line Break Transformer ===== */
+class LineBreakTransformer {
+  constructor(){ this.container=''; }
+  transform(chunk, controller){ this.container += chunk; const lines=this.container.split(/\r?\n/); this.container = lines.pop(); for(const l of lines) controller.enqueue(l); }
+  flush(controller){ if(this.container) controller.enqueue(this.container); }
+}
+
+/* ===== UI Elements ===== */
+const ui = {
+  connectBtn: document.getElementById('connectBtn'),
+  disconnectBtn: document.getElementById('disconnectBtn'),
+  applyBtn: document.getElementById('applyBtn'),
+  baud: document.getElementById('baud'),
+  databits: document.getElementById('databits'),
+  parity: document.getElementById('parity'),
+  stopbits: document.getElementById('stopbits'),
+  status: document.getElementById('status'),
+  latestRaw: document.getElementById('latestRaw'),
+  latestCalN: document.getElementById('latestCalN'),
+  latestCalDisp: document.getElementById('latestCalDisp'),
+  dispUnits: document.getElementById('dispUnits'),
+  dispUnits2: document.getElementById('dispUnits2'),
+  count: document.getElementById('count'),
+  rate: document.getElementById('rate'),
+  logRaw: document.getElementById('logRaw'),
+  logCal: document.getElementById('logCal'),
+  tx: document.getElementById('tx'),
+  sendBtn: document.getElementById('sendBtn'),
+  recordBtn: document.getElementById('recordBtn'),
+  downloadBtn: document.getElementById('downloadBtn'),
+  recStatus: document.getElementById('recStatus'),
+  filePrefix: document.getElementById('filePrefix'),
+  supportMsg: document.getElementById('supportMsg'),
+  chart: document.getElementById('chart'),
+  calibActive: document.getElementById('calibActive'),
+  // calibration
+  avgN: document.getElementById('avgN'),
+  knownValue: document.getElementById('knownValue'),
+  knownUnits: document.getElementById('knownUnits'),
+  capturePointBtn: document.getElementById('capturePointBtn'),
+  removeLastBtn: document.getElementById('removeLastBtn'),
+  clearPointsBtn: document.getElementById('clearPointsBtn'),
+  downloadPointsBtn: document.getElementById('downloadPointsBtn'),
+  scatter: document.getElementById('scatter'),
+  aVal: document.getElementById('aVal'),
+  bVal: document.getElementById('bVal'),
+  r2Val: document.getElementById('r2Val'),
+  rmseVal: document.getElementById('rmseVal'),
+  nVal: document.getElementById('nVal'),
+  eqn: document.getElementById('eqn'),
+  x0Val: document.getElementById('x0Val'),
+  scaleVal: document.getElementById('scaleVal'),
+  fitBtn: document.getElementById('fitBtn'),
+  applyCalBtn: document.getElementById('applyCalBtn'),
+  clearCalBtn: document.getElementById('clearCalBtn'),
+  saveCalBtn: document.getElementById('saveCalBtn'),
+  loadCalBtn: document.getElementById('loadCalBtn'),
+  sendToArduinoBtn: document.getElementById('sendToArduinoBtn'),
+  arduinoHint: document.getElementById('arduinoHint'),
+  pointsTable: document.querySelector('#pointsTable tbody'),
+};
+
+let port=null, reader=null, inputDone=null, outputStream=null, writer=null;
+let running=false, samples=[], startTime=0, lastTickCount=0, lastTickTime=0;
+let recording=false, rows=[["timestamp_iso","t_ms","raw","calibrated_N"]];
+let calib = { a:0, b:1, active:false }; // N = a + b*raw
+let points = []; // {x:raw, yN:number, entered:number, unit:string}
+initTheme();
+
+function setStatus(text, klass=''){ ui.status.textContent=text; ui.status.className='pill '+(klass||''); }
+function appendLog(el, s, max=1000){
+  el.textContent += s + '\n';
+  const linesCount = (el.textContent.match(/\n/g)||[]).length;
+  if(linesCount > max){
+    const trimmed = el.textContent.split('\n');
+    el.textContent = trimmed.slice(Math.max(0, trimmed.length - (max+1))).join('\n');
+  }
+  el.scrollTop = el.scrollHeight;
+}
+function logRawLine(s){ const t=new Date().toISOString(); appendLog(ui.logRaw, `[${t}] ${s}`); }
+function logCalLine(valN){ const t=new Date().toISOString(); appendLog(ui.logCal, `[${t}] ${valN.toFixed(6)} N`); }
+function browserSupportCheck(){
+  if(!('serial' in navigator)){
+    ui.supportMsg.innerHTML = `<span class="err">Web Serial is not available in this browser. Use Chrome or Edge on desktop.</span>`;
+  } else {
+    ui.supportMsg.innerHTML = `<span class="ok">Web Serial is supported.</span>`;
+  }
+}
+browserSupportCheck();
+
+/* ===== Time-series plot (raw) ===== */
+const ctx = ui.chart.getContext('2d');
+function drawTimeSeries(){
+  const w=ui.chart.width, h=ui.chart.height;
+  ctx.clearRect(0,0,w,h);
+
+  // Hint background when NOT calibrated
+  if(!calib.active){
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--uncal-bg').trim() || '#fff7c2';
+    ctx.fillRect(0,0,w,h);
+  }
+
+  const grid = cssVar('--grid'); ctx.strokeStyle = grid; ctx.lineWidth=1;
+  for(let x=0;x<=w;x+=90){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+  for(let y=0;y<=h;y+=56){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+
+  if(samples.length<2) return;
+  const N=Math.min(samples.length,1000);
+  const slice=samples.slice(samples.length-N);
+  const vals = slice.map(s=>s.v).filter(Number.isFinite);
+  if(!vals.length) return;
+  const vmin=Math.min(...vals), vmax=Math.max(...vals);
+  const pad=(vmax-vmin)*0.1 || 1, yMin=vmin-pad, yMax=vmax+pad;
+  ctx.lineWidth=2; ctx.strokeStyle=cssVar('--accent'); ctx.beginPath();
+  slice.forEach((s,i)=>{ const x=(i/(N-1))*w; const y=h - ((s.v - yMin)/(yMax - yMin))*h; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+  ctx.stroke();
+  ctx.fillStyle=cssVar('--muted'); ctx.font='12px ui-monospace, monospace';
+  ctx.fillText(`min: ${vmin.toFixed(3)}   max: ${vmax.toFixed(3)}`, 8, 16);
+}
+function tickRateUpdate(){
+  const now=performance.now(); const dt=(now-lastTickTime)/1000;
+  const dN=samples.length-lastTickCount; const rate=dt>0? dN/dt : 0;
+  ui.rate.textContent = `${rate.toFixed(1)}/s`;
+  lastTickTime=now; lastTickCount=samples.length;
+}
+
+/* ===== Scatter & fit (raw vs N) ===== */
+const sctx = ui.scatter.getContext('2d');
+function drawScatter(){
+  const w=ui.scatter.width, h=ui.scatter.height, pad=40;
+  sctx.clearRect(0,0,w,h);
+  let xr=[0,1], yr=[0,1];
+  if(points.length>0){
+    const xs=points.map(p=>p.x), ys=points.map(p=>p.yN);
+    const xmin=Math.min(...xs), xmax=Math.max(...xs);
+    const ymin=Math.min(...ys), ymax=Math.max(...ys);
+    const xpad=(xmax-xmin)*0.1 || 1, ypad=(ymax-ymin)*0.1 || 1;
+    xr=[xmin-xpad, xmax+xpad]; yr=[ymin-ypad, ymax+ypad];
+  }
+  sctx.strokeStyle=cssVar('--grid'); sctx.lineWidth=1;
+  sctx.strokeRect(pad,pad,w-2*pad,h-2*pad);
+  for(let i=1;i<=8;i++){
+    const x=pad + i*((w-2*pad)/9);
+    const y=pad + i*((h-2*pad)/9);
+    sctx.beginPath(); sctx.moveTo(x,pad); sctx.lineTo(x,h-pad); sctx.stroke();
+    sctx.beginPath(); sctx.moveTo(pad,y); sctx.lineTo(w-pad,y); sctx.stroke();
+  }
+  const X = x=>pad + ((x - xr[0])/(xr[1]-xr[0]))*(w-2*pad);
+  const Y = y=>h-pad - ((y - yr[0])/(yr[1]-yr[0]))*(h-2*pad);
+  sctx.fillStyle = cssVar('--text');
+  points.forEach(p=>{ sctx.beginPath(); sctx.arc(X(p.x), Y(p.yN), 3, 0, Math.PI*2); sctx.fill(); });
+  if(calculated){
+    const xs=[xr[0], xr[1]];
+    const ys = xs.map(x => calculated.a + calculated.b*x);
+    sctx.strokeStyle=cssVar('--accent'); sctx.lineWidth=2; sctx.beginPath();
+    sctx.moveTo(X(xs[0]), Y(ys[0])); sctx.lineTo(X(xs[1]), Y(ys[1])); sctx.stroke();
+  }
+  sctx.fillStyle=cssVar('--muted'); sctx.font='12px ui-monospace, monospace';
+  sctx.fillText('raw', w/2 - 10, h-12);
+  sctx.save(); sctx.translate(12,h/2); sctx.rotate(-Math.PI/2);
+  sctx.fillText('N (Newton)', 0, 0); sctx.restore();
+}
+
+let calculated = null; // {a,b,r2,rmse,n,x0,scale}
+function mean(arr){ return arr.length? arr.reduce((a,b)=>a+b,0)/arr.length : NaN; }
+function computeFit(){
+  if(points.length<2){ calculated=null; updateFitUI(); drawScatter(); return; }
+  const xs = points.map(p=>p.x);
+  const ys = points.map(p=>p.yN);
+  const n = xs.length;
+  const xbar = mean(xs), ybar = mean(ys);
+  let Sxx=0, Sxy=0, Syy=0;
+  for(let i=0;i<n;i++){ const dx=xs[i]-xbar, dy=ys[i]-ybar; Sxx+=dx*dx; Sxy+=dx*dy; Syy+=dy*dy; }
+  const b = Sxx===0 ? 0 : Sxy / Sxx;
+  const a = ybar - b*xbar;
+  const yhat = xs.map(x => a + b*x);
+  const ssRes = ys.reduce((s,y,i)=> s + (y - yhat[i])**2, 0);
+  const r2 = (Syy===0) ? 1 : 1 - (ssRes/Syy);
+  const rmse = Math.sqrt(ssRes/n);
+  const x0 = (b!==0) ? (-a/b) : NaN;
+  const scale = (b!==0) ? (1/b) : NaN;
+  calculated = { a, b, r2, rmse, n, x0, scale };
+  updateFitUI(); drawScatter();
+}
+function fmt(v){ return Number.isFinite(v)? ((Math.abs(v)<1e-3||Math.abs(v)>1e5)? v.toExponential(4): v.toFixed(6)) : '—'; }
+function updateFitUI(){
+  if(!calculated){
+    ui.aVal.textContent='—'; ui.bVal.textContent='—'; ui.r2Val.textContent='—';
+    ui.rmseVal.textContent='—'; ui.nVal.textContent=String(points.length);
+    ui.eqn.textContent='N = a + b · raw'; ui.x0Val.textContent='—'; ui.scaleVal.textContent='—'; ui.arduinoHint.textContent='';
+    return;
+  }
+  ui.aVal.textContent = fmt(calculated.a);
+  ui.bVal.textContent = fmt(calculated.b);
+  ui.r2Val.textContent = fmt(calculated.r2);
+  ui.rmseVal.textContent = fmt(calculated.rmse);
+  ui.nVal.textContent = String(calculated.n);
+  ui.eqn.textContent = `N = ${fmt(calculated.a)} + ${fmt(calculated.b)} · raw`;
+  ui.x0Val.textContent = Number.isFinite(calculated.x0)? fmt(calculated.x0) : '—';
+  ui.scaleVal.textContent = Number.isFinite(calculated.scale)? fmt(calculated.scale) : '—';
+  if(Number.isFinite(calculated.x0) && Number.isFinite(calculated.scale)){
+    ui.arduinoHint.textContent = `Try: SET_OFFSET ${fmt(calculated.x0)}  •  SET_SCALE ${fmt(calculated.scale)} (maps raw → Newtons)`;
+  } else {
+    ui.arduinoHint.textContent = 'Slope is zero; cannot compute HX711 offset/scale.';
+  }
+}
+
+/* ===== Calibration actions ===== */
+function captureAvgRaw(N){
+  const valid = samples.slice(-Math.max(N,1)).map(s=>s.v).filter(Number.isFinite);
+  if(!valid.length) return NaN;
+  return valid.reduce((a,b)=>a+b,0)/valid.length;
+}
+function refreshPointsTable(){
+  const tb = ui.pointsTable; tb.innerHTML='';
+  points.forEach((p,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td><td>${p.x.toFixed(6)}</td><td>${p.yN.toFixed(6)}</td><td>${p.entered.toFixed(6)} ${p.unit}</td>`;
+    tb.appendChild(tr);
+  });
+  drawScatter();
+  computeFit();
+}
+
+ui.capturePointBtn.addEventListener('click', ()=>{
+  const N = Number(ui.avgN.value)||1;
+  const entered = parseFloat(ui.knownValue.value);
+  const unit = ui.knownUnits.value;
+  if(!Number.isFinite(entered)){ alert('Enter a known value. Use 0 to capture zero point.'); return; }
+  const x = captureAvgRaw(N);
+  if(!Number.isFinite(x)){ alert('Not enough valid samples yet.'); return; }
+  const yN = toN(entered, unit);
+  if(!Number.isFinite(yN)){ alert('Unsupported unit.'); return; }
+  points.push({ x, yN, entered, unit });
+  ui.knownValue.value='';
+  refreshPointsTable();
+});
+ui.removeLastBtn.addEventListener('click', ()=>{ points.pop(); refreshPointsTable(); });
+ui.clearPointsBtn.addEventListener('click', ()=>{ points.length=0; refreshPointsTable(); });
+
+ui.downloadPointsBtn.addEventListener('click', ()=>{
+  const header = ['idx','raw','N','entered','unit'];
+  const rows = points.map((p,i)=>[i+1, p.x, p.yN, p.entered, p.unit]);
+  const csv = [header, ...rows].map(r=>r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const ts=new Date().toISOString().replace(/[-:T.Z]/g,'').slice(0,15);
+  a.href=url; a.download=`calibration_points_${ts}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+});
+
+ui.fitBtn.addEventListener('click', computeFit);
+
+ui.applyCalBtn.addEventListener('click', ()=>{
+  if(!calculated){ alert('Compute fit first.'); return; }
+  calib = { a: calculated.a, b: calculated.b, active:true };
+  ui.calibActive.textContent='Calibrated';
+  ui.calibActive.classList.add('ok'); // green text indicator
+  drawTimeSeries(); // update plot background hint
+});
+ui.clearCalBtn.addEventListener('click', ()=>{
+  calib.active=false;
+  ui.calibActive.textContent='off';
+  ui.calibActive.classList.remove('ok');
+  ui.latestCalN.textContent='—'; ui.latestCalDisp.textContent='—';
+  drawTimeSeries(); // show yellow hint again
+});
+
+ui.saveCalBtn.addEventListener('click', ()=>{
+  if(!calculated){ alert('Nothing to save. Compute fit first.'); return; }
+  const pkg = { calculated, points, ts: Date.now(), dispUnits: ui.dispUnits.value };
+  localStorage.setItem('hx_calibration_units_v3', JSON.stringify(pkg));
+  alert('Saved.');
+});
+ui.loadCalBtn.addEventListener('click', ()=>{
+  const s = localStorage.getItem('hx_calibration_units_v3');
+  if(!s){ alert('No saved calibration.'); return; }
+  try{
+    const pkg = JSON.parse(s);
+    points = pkg.points||[];
+    if(pkg.calculated){ calculated = pkg.calculated; updateFitUI(); drawScatter(); }
+    if(pkg.dispUnits){ ui.dispUnits.value = pkg.dispUnits; ui.dispUnits2.value = pkg.dispUnits; }
+    refreshPointsTable();
+    alert('Loaded.');
+  }catch(e){ alert('Failed to load.'); }
+});
+
+ui.sendToArduinoBtn.addEventListener('click', async ()=>{
+  if(!writer){ alert('Not connected or writer not ready.'); return; }
+  if(!calculated){ alert('Compute fit first.'); return; }
+  if(!Number.isFinite(calculated.x0) || !Number.isFinite(calculated.scale)){ alert('Fit not valid.'); return; }
+  const enc = new TextEncoder();
+  try{
+    await writer.write(enc.encode(`SET_OFFSET ${calculated.x0}\n`));
+    await writer.write(enc.encode(`SET_SCALE ${calculated.scale}\n`));
+    logRawLine(`> SET_OFFSET ${calculated.x0}`);
+    logRawLine(`> SET_SCALE ${calculated.scale}`);
+  }catch(e){ logRawLine('ERROR sending to Arduino: '+e.message); }
+});
+
+/* ===== Serial connect / read ===== */
+function getUIConfig(){ return {
+  baudRate:Number(ui.baud.value), dataBits:Number(ui.databits.value),
+  parity:ui.parity.value, stopBits:Number(ui.stopbits.value), flowControl:'none'
+};}
+async function connect(){
+  try{
+    port = await navigator.serial.requestPort();
+    await port.open(getUIConfig());
+    setStatus('Connected','ok');
+    ui.connectBtn.disabled=true; ui.disconnectBtn.disabled=false; ui.applyBtn.disabled=true;
+    if(port.writable){ outputStream=port.writable; writer=outputStream.getWriter(); }
+    startReading();
+  }catch(err){ setStatus('Failed to connect','err'); logRawLine('ERROR: '+err.message); }
+}
+async function applySettings(){
+  if(!port){ setStatus('Not connected'); return; }
+  try{
+    if(reader) await stopReading();
+    await port.close();
+    await port.open(getUIConfig());
+    setStatus('Reopened with new settings','ok');
+    startReading();
+  }catch(err){ setStatus('Failed to apply settings','err'); logRawLine('ERROR: '+err.message); }
+}
+async function disconnect(){
+  try{
+    await stopReading();
+    if(writer){ try{ writer.releaseLock(); }catch{} }
+    if(port){ try{ await port.close(); }catch{} }
+  } finally {
+    port=null; writer=null; outputStream=null;
+    setStatus('Not connected'); ui.connectBtn.disabled=false; ui.disconnectBtn.disabled=true; ui.applyBtn.disabled=false;
+  }
+}
+async function startReading(){
+  running=true; startTime=performance.now(); lastTickTime=startTime; lastTickCount=0;
+  const textDecoder = new TextDecoderStream();
+  inputDone = port.readable.pipeTo(textDecoder.writable);
+  const inputStream = textDecoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer()));
+  reader = inputStream.getReader();
+  logRawLine('Reading started');
+
+  (async ()=>{
+    try{
+      while(running){
+        const {value, done} = await reader.read();
+        if(done) break;
+        if(value===undefined) continue;
+
+        const t = performance.now() - startTime;
+        const num = Number(value.trim());
+        if(!Number.isNaN(num)){
+          samples.push({t, v:num});
+          ui.latestRaw.textContent = num.toFixed(6);
+
+          let nVal = NaN;
+          if(calib.active){
+            nVal = calib.a + calib.b*num; // Newtons
+            if(Number.isFinite(nVal)){
+              ui.latestCalN.textContent = nVal.toFixed(6) + ' N';
+              const dispVal = fromN(nVal, ui.dispUnits.value);
+              ui.latestCalDisp.textContent = (Number.isFinite(dispVal)? dispVal.toFixed(6)+' '+ui.dispUnits.value : '—');
+              logCalLine(nVal);
+            }
+          }
+
+          ui.count.textContent = String(samples.length);
+
+          if(recording){
+            const iso=new Date().toISOString();
+            rows.push([iso, Math.round(t), num, Number.isFinite(nVal)? nVal : '']);
+          }
+        }
+        logRawLine(value);
+        if(samples.length % 2===0) drawTimeSeries();
+        if(samples.length % 20===0) tickRateUpdate();
+      }
+    }catch(err){ logRawLine('ERROR: '+err.message); setStatus('Read error','err'); }
+    finally{ logRawLine('Reading stopped'); }
+  })();
+}
+async function stopReading(){
+  running=false;
+  try{ if(reader) await reader.cancel(); }catch{}
+  try{ if(inputDone) await inputDone; }catch{}
+  reader=null; inputDone=null;
+}
+
+/* ===== Send & Recording ===== */
+async function sendCommand(){
+  if(!writer){ logRawLine('Cannot send: writer not ready'); return; }
+  const txt = ui.tx.value||''; if(!txt) return;
+  try{ const enc=new TextEncoder(); await writer.write(enc.encode(txt+'\n')); logRawLine('> '+txt); ui.tx.value=''; }
+  catch(err){ logRawLine('ERROR sending: '+err.message); }
+}
+
+function toggleRecordingUI(on){
+  if(on){
+    ui.recordBtn.classList.remove('btn-rec-off');
+    ui.recordBtn.classList.add('btn-rec-on');
+    ui.recordBtn.innerHTML = `<span class="rec-dot"></span>Recording`;
+    ui.recStatus.textContent = 'Recording…';
+  } else {
+    ui.recordBtn.classList.remove('btn-rec-on');
+    ui.recordBtn.classList.add('btn-rec-off');
+    ui.recordBtn.textContent = 'Record';
+    ui.recStatus.textContent = 'Not recording';
+  }
+}
+function toggleRecording(){
+  recording=!recording;
+  if(recording){
+    rows=[["timestamp_iso","t_ms","raw","calibrated_N"]];
+    toggleRecordingUI(true);
+    ui.downloadBtn.disabled=true;
+  } else {
+    toggleRecordingUI(false);
+    ui.downloadBtn.disabled = rows.length<=1;
+  }
+}
+function downloadCSV(){
+  if(rows.length<=1) return;
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const ts=new Date().toISOString().replace(/[-:T.Z]/g,'').slice(0,15);
+  const prefix = (ui.filePrefix.value && ui.filePrefix.value.trim()) ? ui.filePrefix.value.trim() : 'serial_log';
+  a.href=url; a.download=`${prefix}_${ts}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+/* ===== Wire up ===== */
+document.getElementById('dispUnits').addEventListener('change', ()=>{
+  ui.dispUnits2.value = ui.dispUnits.value;
+});
+document.getElementById('dispUnits2').addEventListener('change', ()=>{
+  ui.dispUnits.value = ui.dispUnits2.value;
+});
+ui.connectBtn.addEventListener('click', async ()=>{
+  if(!('serial' in navigator)){ alert('Web Serial not supported here. Use Chrome or Edge.'); return; }
+  await connect();
+});
+ui.disconnectBtn.addEventListener('click', disconnect);
+ui.applyBtn.addEventListener('click', applySettings);
+ui.sendBtn.addEventListener('click', sendCommand);
+ui.tx.addEventListener('keydown', e=>{ if(e.key==='Enter') sendCommand(); });
+ui.recordBtn.addEventListener('click', toggleRecording);
+ui.downloadBtn.addEventListener('click', downloadCSV);
+
+/* ===== Init ===== */
+drawTimeSeries(); drawScatter();
+ui.baud.value='38400';
+ui.calibActive.textContent='off';
+</script>
+</body>
+</html>
