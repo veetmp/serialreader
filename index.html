@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Serial Viewer + Calibration (Light)</title>
+<title>BMEN 361: MoCap</title>
 <style>
   :root{
     --bg:#f8fafc; --card:#ffffff; --muted:#475569; --text:#0f172a; --accent:#0ea5e9;
@@ -58,10 +58,10 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Serial Viewer + Calibration</h1>
+  <h1>BMEN 361: LAB2 Motion Capture </h1>
+  <h3>Serial Viewer + Calibration</h3>
 
   <div class="grid">
-    <!-- Left: Connection + Advanced + Recordings list -->
     <div class="card">
       <div class="row" style="justify-content:space-between;">
         <div class="row">
@@ -72,6 +72,24 @@
         <button id="jumpToCal" class="btn-link" title="Scroll to calibration">Go to Calibration</button>
       </div>
 
+      <div class="sep"></div>
+      <details>
+      <summary><strong>Quick Start Guide</strong></summary>
+        <ol style="padding-left: 20px; margin-top: 10px;">
+          <li style="margin-bottom: 8px;">
+            <strong>Connect:</strong> Click the <strong>Connect</strong> button, select your device, and wait for data to appear in the 'Raw log'.
+          </li>
+          <li style="margin-bottom: 8px;">
+            <strong>Calibrate:</strong> Go to the <strong>Calibration</strong> section. Capture at least two points: one with no weight (enter <strong>0</strong>) and one with a known weight. Click <strong>Apply to stream</strong>—the graph background will turn white.
+          </li>
+          <li style="margin-bottom: 8px;">
+            <strong>Record:</strong> Click <strong>Record</strong> to start and stop logging data. A red area will appear on the graph. When finished, click <strong>Download last CSV</strong> to save your file.
+          </li>
+        </ol>
+      </details>
+
+
+      
       <div class="sep"></div>
 
       <details id="advanced">
@@ -108,12 +126,11 @@
         <div class="col">
           <label><b>Precision (decimals)</b></label>
           <div class="row">
-            <label style="min-width:54px;">N</label><input id="precN"   type="number" min="0" max="9" value="3" style="width:80px;">
+            <label style="min-width:54px;">N</label><input id="precN"   type="number" min="0" max="9" value="1" style="width:80px;">
             <label style="min-width:54px;">kg</label><input id="precKg" type="number" min="0" max="9" value="1" style="width:80px;">
             <label style="min-width:54px;">g</label><input id="precG"   type="number" min="0" max="9" value="0" style="width:80px;">
             <label style="min-width:54px;">lbf</label><input id="precLbf"type="number" min="0" max="9" value="1" style="width:80px;">
           </div>
-          <span class="muted">Defaults: kg=1, lbf=1, g=0, N=3.</span>
         </div>
       </details>
 
